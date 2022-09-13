@@ -67,6 +67,29 @@ mem_access_t read_transaction(FILE* ptr_file) {
   return access;
 }
 
+
+// Calculate the integer log2 of a given number.
+// Gotten from https://stackoverflow.com/questions/994593/how-to-do-an-integer-log2-in-c 
+static inline uint32_t ilog2(const uint32_t x) {
+  uint32_t y;
+  asm ( "\tbsr %1, %0\n"
+      : "=r"(y)
+      : "r" (x)
+  );
+  return y;
+}
+
+void print_cache(uint32_t* cache, uint32_t length)
+{
+  printf("\n\n");
+  for (uint32_t i = 0; i < length; i++)
+  {
+    printf("%d\t%x\n", i, cache[i]);
+  }
+  printf("\n\n");
+}
+  
+
 void main(int argc, char** argv) {
   // Reset statistics:
   memset(&cache_statistics, 0, sizeof(cache_stat_t));
@@ -113,11 +136,28 @@ void main(int argc, char** argv) {
 
   /* Open the file mem_trace.txt to read memory accesses */
   FILE* ptr_file;
-  ptr_file = fopen("mem_trace.txt", "r");
+  ptr_file = fopen("mem_trace2.txt", "r");
   if (!ptr_file) {
     printf("Unable to open the trace file\n");
     exit(1);
   }
+
+  // printf("log2(8)=%d", ilog2(32));
+
+  uint32_t cache_size_blocks = cache_size / block_size;
+  uint32_t block_offset_bits = ilog2(block_size);// / sizeof(uint32_t);
+  uint32_t index_bits = ilog2(cache_size_blocks);
+
+  uint32_t index_mask = 0b0;
+  for (uint32_t i = 0; i<index_bits; i++) index_mask = (index_mask << 1) | 0b1;
+
+
+  printf("cache_size_blocks=%d\n", cache_size_blocks);
+  printf("block_offset_bits=%d\n", block_offset_bits);
+  printf("index_bits=%d\n", index_bits);
+  printf("index_mask=%x\n", index_mask);
+
+  uint32_t *cache = (uint32_t *) malloc(cache_size_blocks*sizeof(uint32_t)); 
 
   /* Loop until whole trace file has been read */
   mem_access_t access;
@@ -125,10 +165,31 @@ void main(int argc, char** argv) {
     access = read_transaction(ptr_file);
     // If no transactions left, break out of loop
     if (access.address == 0) break;
-    printf("%d %x\n", access.accesstype, access.address);
+    // printf("%d %x ", access.accesstype, access.address);
     /* Do a cache access */
-    // ADD YOUR CODE HERE
+
+    cache_statistics.accesses++;
+
+    uint32_t index = access.address & index_mask;
+    uint32_t tag = access.address >> (index_bits + block_offset_bits);
+    // printf("\t\tIndex: %d \tTag:%x", index, tag);
+    
+    if (tag == cache[index]) {
+      cache_statistics.hits++;
+      // printf("\tHit!");
+    }
+    else 
+    {
+      cache[index] = tag;
+      // printf("penis");
+    }
+    
+    // print_cache(cache, cache_size_blocks);
+
+    // printf("\n");
   }
+
+  free(cache);
 
   /* Print the statistics */
   // DO NOT CHANGE THE FOLLOWING LINES!
