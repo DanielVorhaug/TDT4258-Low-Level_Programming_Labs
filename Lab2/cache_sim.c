@@ -176,44 +176,47 @@ void main(int argc, char **argv)
     exit(1);
   }
 
-  if (cache_mapping == dm)
+  uint32_t total_cache_size_blocks = cache_size / block_size;
+  uint32_t single_cache_size_blocks = (cache_org == sc) ? (total_cache_size_blocks / 2) : total_cache_size_blocks;
+  uint32_t block_offset_bits = ilog2(block_size);
+  uint32_t index_bits = ilog2(single_cache_size_blocks);
+
+  uint32_t index_mask = 0b0;
+  for (uint32_t i = 0; i < index_bits; i++)
+    index_mask = (index_mask << 1) | 0b1;
+
+  // printf("\n\ntotal_cache_size_blocks=%d\n", total_cache_size_blocks);
+  // printf("single_cache_size_blocks=%d\n", single_cache_size_blocks);
+  // printf("cache_size_blocks=%d\n", total_cache_size_blocks);
+  // printf("block_offset_bits=%d\n", block_offset_bits);
+  // printf("index_bits=%d\n", index_bits);
+  // printf("index_mask=%x\n", index_mask);
+
+  uint8_t *cache_valid = (uint8_t *)malloc(total_cache_size_blocks * sizeof(uint8_t));
+  uint32_t *cache = (uint32_t *)malloc(total_cache_size_blocks * sizeof(uint32_t));
+  uint32_t head = 0; // Next cache address to be replaced with fully associative cache
+  uint32_t head_data = 0; // Next data cache address to be replaced with fully associative split cache
+
+  for (uint32_t i = 0; i < total_cache_size_blocks; i++)
+    cache_valid[i] = 0;
+
+  /* Loop until whole trace file has been read */
+  mem_access_t access;
+  while (1)
   {
-    uint32_t total_cache_size_blocks = cache_size / block_size;
-    uint32_t single_cache_size_blocks = (cache_org == sc) ? (total_cache_size_blocks / 2) : total_cache_size_blocks;
-    uint32_t block_offset_bits = ilog2(block_size);
-    uint32_t index_bits = ilog2(single_cache_size_blocks);
+    access = read_transaction(ptr_file);
+    // If no transactions left, break out of loop
+    if (access.address == 0)
+      break;
+    // printf("%d %x ", access.accesstype, access.address);
+    /* Do a cache access */
 
-    uint32_t index_mask = 0b0;
-    for (uint32_t i = 0; i < index_bits; i++)
-      index_mask = (index_mask << 1) | 0b1;
+    cache_statistics.accesses++;
 
-    printf("total_cache_size_blocks=%d\n", total_cache_size_blocks);
-    printf("single_cache_size_blocks=%d\n", single_cache_size_blocks);
-    printf("cache_size_blocks=%d\n", total_cache_size_blocks);
-    printf("block_offset_bits=%d\n", block_offset_bits);
-    printf("index_bits=%d\n", index_bits);
-    printf("index_mask=%x\n", index_mask);
-
-    uint8_t *cache_valid = (uint8_t *)malloc(total_cache_size_blocks * sizeof(uint8_t));
-    uint32_t *cache = (uint32_t *)malloc(total_cache_size_blocks * sizeof(uint32_t));
-
-    for (uint32_t i = 0; i < total_cache_size_blocks; i++)
-      cache_valid[i] = 0;
-
-    /* Loop until whole trace file has been read */
-    mem_access_t access;
-    while (1)
+    if (cache_mapping == dm)
     {
-      access = read_transaction(ptr_file);
-      // If no transactions left, break out of loop
-      if (access.address == 0)
-        break;
-      // printf("%d %x ", access.accesstype, access.address);
-      /* Do a cache access */
 
-      cache_statistics.accesses++;
-
-      uint32_t index = access.address & index_mask;
+      uint32_t index = (access.address >> block_offset_bits) & index_mask;
       if (cache_org == sc && access.accesstype == data)
         index += single_cache_size_blocks;
       uint32_t tag = access.address >> (index_bits + block_offset_bits);
@@ -227,19 +230,58 @@ void main(int argc, char **argv)
         cache_valid[index] = 1;
         cache[index] = tag;
       }
+
     }
-    free(cache_valid);
-    free(cache);
-  }
-  else if (cache_mapping == fa)
-  {
-    if (cache_org == uc)
+    else if (cache_mapping == fa) 
     {
-    }
-    else if (cache_org == sc)
-    {
+
+      uint32_t tag = access.address >> block_offset_bits;
+      uint8_t hit = 0;
+
+      // (cache_org == uc) ? 0 : single_cache_size_blocks;
+      for (uint32_t i = 0; i < single_cache_size_blocks; i++)
+      {
+        uint32_t index = (cache_org == uc) ? i : (i + single_cache_size_blocks);
+        if (cache_valid[index] && cache[index] == tag)
+        {
+          hit = 1;
+          break;
+        }
+      }
+
+      if (hit) 
+      {
+        cache_statistics.hits++;
+      }
+      else
+      {
+        if (cache_org == uc)
+        {
+          cache_valid[head] = 1;
+          cache[head] = tag;
+
+          // Increment what address to replace
+          head++;
+          // Check if we've reached the end of the cache
+          if (head == single_cache_size_blocks)
+            head = 0;
+        }
+        else 
+        {
+          cache_valid[head_data] = 1;
+          cache[head_data] = tag;
+
+          // Increment what address to replace
+          head_data++;
+          // Check if we've reached the end of the cache
+          if (head_data == 2*single_cache_size_blocks)
+            head_data = single_cache_size_blocks;
+        }
+      }
     }
   }
+  free(cache_valid);
+  free(cache);
 
   /* Print the statistics */
   // DO NOT CHANGE THE FOLLOWING LINES!
