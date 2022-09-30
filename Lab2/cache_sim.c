@@ -88,7 +88,7 @@ mem_access_t read_transaction(FILE *ptr_file)
   return access;
 }
 
-// Calculate the integer log2 of a given number.
+// Calculate the integer log2 of a given integer.
 // Gotten from https://stackoverflow.com/questions/994593/how-to-do-an-integer-log2-in-c
 static inline uint32_t ilog2(const uint32_t x)
 {
@@ -97,16 +97,6 @@ static inline uint32_t ilog2(const uint32_t x)
       : "=r"(y)
       : "r"(x));
   return y;
-}
-
-void print_cache(uint32_t *cache, uint32_t length)
-{
-  printf("\n\n");
-  for (uint32_t i = 0; i < length; i++)
-  {
-    printf("%d\t%x\n", i, cache[i]);
-  }
-  printf("\n\n");
 }
 
 void main(int argc, char **argv)
@@ -176,29 +166,27 @@ void main(int argc, char **argv)
     exit(1);
   }
 
+  // Total number of blocks in cache
   uint32_t total_cache_size_blocks = cache_size / block_size;
+  // Number of blocks per cache
   uint32_t single_cache_size_blocks = (cache_org == sc) ? (total_cache_size_blocks / 2) : total_cache_size_blocks;
+
   uint32_t block_offset_bits = ilog2(block_size);
   uint32_t index_bits = ilog2(single_cache_size_blocks);
 
+  // Create the mask to extract the index in direct mapped cache
   uint32_t index_mask = 0b0;
   for (uint32_t i = 0; i < index_bits; i++)
     index_mask = (index_mask << 1) | 0b1;
 
-  // printf("\n\ntotal_cache_size_blocks=%d\n", total_cache_size_blocks);
-  // printf("single_cache_size_blocks=%d\n", single_cache_size_blocks);
-  // printf("cache_size_blocks=%d\n", total_cache_size_blocks);
-  // printf("block_offset_bits=%d\n", block_offset_bits);
-  // printf("index_bits=%d\n", index_bits);
-  // printf("index_mask=%x\n", index_mask);
+  // Allocate memory for the cache valid bits and cache tags
+  uint8_t *cache_valid = (uint8_t *)calloc(total_cache_size_blocks, sizeof(uint8_t));
+  uint32_t *cache = (uint32_t *)calloc(total_cache_size_blocks, sizeof(uint32_t));
 
-  uint8_t *cache_valid = (uint8_t *)malloc(total_cache_size_blocks * sizeof(uint8_t));
-  uint32_t *cache = (uint32_t *)malloc(total_cache_size_blocks * sizeof(uint32_t));
-  uint32_t head = 0; // Next cache address to be replaced with fully associative cache
-  uint32_t head_data = 0; // Next data cache address to be replaced with fully associative split cache
-
-  for (uint32_t i = 0; i < total_cache_size_blocks; i++)
-    cache_valid[i] = 0;
+  // Next cache address to be replaced with fully associative cache
+  uint32_t head = 0;
+  // Next data cache address to be replaced with fully associative split cache
+  uint32_t head_data = single_cache_size_blocks;
 
   /* Loop until whole trace file has been read */
   mem_access_t access;
@@ -208,55 +196,86 @@ void main(int argc, char **argv)
     // If no transactions left, break out of loop
     if (access.address == 0)
       break;
-    // printf("%d %x ", access.accesstype, access.address);
     /* Do a cache access */
 
     cache_statistics.accesses++;
 
+    // Handle direct mapped cache
     if (cache_mapping == dm)
     {
-
+      // Find tag
+      uint32_t tag = access.address >> (index_bits + block_offset_bits);
+      // Find index
       uint32_t index = (access.address >> block_offset_bits) & index_mask;
+
+      // Move index to data part of cache if appropriate
       if (cache_org == sc && access.accesstype == data)
         index += single_cache_size_blocks;
-      uint32_t tag = access.address >> (index_bits + block_offset_bits);
 
       if (cache_valid[index] && (tag == cache[index]))
       {
+        // Cache hit detected
         cache_statistics.hits++;
       }
       else
       {
+        // Write the address to the cache
         cache_valid[index] = 1;
         cache[index] = tag;
       }
-
     }
-    else if (cache_mapping == fa) 
+    // Handle fully associative cache
+    else if (cache_mapping == fa)
     {
-
+      // Find tag
       uint32_t tag = access.address >> block_offset_bits;
+
+      // Keep track if a hit has been detected
       uint8_t hit = 0;
 
-      // (cache_org == uc) ? 0 : single_cache_size_blocks;
-      for (uint32_t i = 0; i < single_cache_size_blocks; i++)
+      uint32_t index_begin = 0;
+      uint32_t index_end = single_cache_size_blocks;
+      if (cache_org == sc && access.accesstype == data)
       {
-        uint32_t index = (cache_org == uc) ? i : (i + single_cache_size_blocks);
+        index_begin += single_cache_size_blocks;
+        index_end += single_cache_size_blocks;
+      }
+
+      // Loop through cache for a hit
+      for (uint32_t index = index_begin; index < index_end; index++)
+      {
         if (cache_valid[index] && cache[index] == tag)
         {
+          // Hit detected
           hit = 1;
           break;
         }
       }
 
-      if (hit) 
+      if (hit)
       {
+        // Cache hit detected
         cache_statistics.hits++;
       }
       else
       {
-        if (cache_org == uc)
+        // Write the address to the cache
+        
+        if (cache_org == sc && access.accesstype == data)
         {
+          // Write to data cache
+          cache_valid[head_data] = 1;
+          cache[head_data] = tag;
+
+          // Increment what address to replace
+          head_data++;
+          // Check if we've reached the end of the cache
+          if (head_data == 2 * single_cache_size_blocks)
+            head_data = single_cache_size_blocks;
+        }
+        else
+        {
+          // Write to unified cache or instruction cache if seperated
           cache_valid[head] = 1;
           cache[head] = tag;
 
@@ -266,20 +285,10 @@ void main(int argc, char **argv)
           if (head == single_cache_size_blocks)
             head = 0;
         }
-        else 
-        {
-          cache_valid[head_data] = 1;
-          cache[head_data] = tag;
-
-          // Increment what address to replace
-          head_data++;
-          // Check if we've reached the end of the cache
-          if (head_data == 2*single_cache_size_blocks)
-            head_data = single_cache_size_blocks;
-        }
       }
     }
   }
+  // Free allocated memory
   free(cache_valid);
   free(cache);
 
