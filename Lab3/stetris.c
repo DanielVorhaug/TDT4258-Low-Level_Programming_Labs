@@ -14,6 +14,7 @@
 #include <time.h>
 #include <poll.h>
 #include <math.h>
+#include <time.h>
 
 // The game state can be used to detect what happens on the playfield
 #define GAMEOVER 0
@@ -26,6 +27,7 @@
 typedef struct
 {
   bool occupied;
+  // uint16_t color;
 } tile;
 
 typedef struct
@@ -123,12 +125,15 @@ bool initializeSenseHat()
 
   map_size = vinfo.xres * vinfo.yres * vinfo.bits_per_pixel / 8;
   fbmap = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+  close(fbfd);
 
-  uint16_t red = (pow(2, 5) - 1) * 0.25f;
-  uint16_t green = (pow(2, 6) - 1) * 0.0f;
-  uint16_t blue = (pow(2, 5) - 1) * 0.25f;
+  srand(time(NULL)); // Initialization, should only be called once
 
-  uint16_t color = red << 11 | green << 5 | blue;
+  // uint16_t red = rand() >> (32 - 5);   //(pow(2, 5) - 1) * 0.25f;
+  // uint16_t green = rand() >> (32 - 6); //(pow(2, 6) - 1) * 0.0f;
+  // uint16_t blue = rand() >> (32 - 5);  //(pow(2, 5) - 1) * 0.25f;
+
+  uint16_t color = rand() >> 16; // red << 11 | green << 5 | blue;
 
   for (size_t i = 0; i < map_size; i++)
   {
@@ -157,6 +162,7 @@ bool initializeSenseHat()
 // Here you can free up everything that you might have opened/allocated
 void freeSenseHat()
 {
+  munmap(fbmap, map_size);
 }
 
 // This function should return the key that corresponds to the joystick press
@@ -166,14 +172,6 @@ void freeSenseHat()
 int readSenseHatJoystick()
 {
   return 0;
-}
-
-// This function should render the gamefield on the LED matrix. It is called
-// every game tick. The parameter playfieldChanged signals whether the game logic
-// has changed the playfield
-void renderSenseHatMatrix(bool const playfieldChanged)
-{
-  (void)playfieldChanged;
 }
 
 // The game logic uses only the following functions to interact with the playfield.
@@ -494,6 +492,30 @@ void renderConsole(bool const playfieldChanged)
   fflush(stdout);
 }
 
+// This function should render the gamefield on the LED matrix. It is called
+// every game tick. The parameter playfieldChanged signals whether the game logic
+// has changed the playfield
+void renderSenseHatMatrix(bool const playfieldChanged)
+{
+  if (!playfieldChanged)
+    return;
+
+  for (size_t i = 0; i < map_size; i++)
+  {
+    fbmap[i] = 0x0000;
+  }
+
+  for (unsigned int y = 0; y < game.grid.y; y++)
+  {
+    for (unsigned int x = 0; x < game.grid.x; x++)
+    {
+      coord const checkTile = {x, y};
+      fbmap[y * game.grid.x + x] = (tileOccupied(checkTile) ? 0xffff : 0x0000);
+      // fprintf(stdout, "%c", (tileOccupied(checkTile)) ? '#' : ' ');
+    }
+  }
+}
+
 inline unsigned long uSecFromTimespec(struct timespec const ts)
 {
   return ((ts.tv_sec * 1000000) + (ts.tv_nsec / 1000));
@@ -540,7 +562,7 @@ int main(int argc, char **argv)
 
   // Clear console, render first time
   fprintf(stdout, "\033[H\033[J");
-  // renderConsole(true);
+  renderConsole(true);
   renderSenseHatMatrix(true);
 
   while (true)
@@ -555,7 +577,7 @@ int main(int argc, char **argv)
       break;
 
     bool playfieldChanged = sTetris(key);
-    // renderConsole(playfieldChanged);
+    renderConsole(playfieldChanged);
     renderSenseHatMatrix(playfieldChanged);
 
     // Wait for next tick
