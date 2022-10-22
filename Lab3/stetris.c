@@ -2,12 +2,18 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <termios.h>
+#include <inttypes.h>
 #include <sys/select.h>
+#include <sys/mman.h>
+#include <linux/fb.h>
 #include <linux/input.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
 #include <poll.h>
+#include <math.h>
 
 // The game state can be used to detect what happens on the playfield
 #define GAMEOVER 0
@@ -58,11 +64,92 @@ gameConfig game = {
     .initNextGameTick = 50,
 };
 
+size_t map_size;
+uint16_t *fbmap;
+
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat()
 {
+  int fbfd;
+
+  for (uint32_t i = 0; i < 10; i++)
+  {
+    char address[] = "/dev/fb0";
+    address[sizeof(address) / sizeof(char) - 2] = (char)(i + 0x30); // Change address to /dev/fb0 - /dev/fb9
+    // printf("%s\n", address);
+
+    fbfd = open(address, O_RDWR);
+    if (fbfd >= 0)
+    {
+      struct fb_fix_screeninfo finfo;
+      ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
+      // printf("%s\n", finfo.id);
+
+      // Check if it is the correct framebuffer
+      char corrct_id[] = "RPi-Sense FB";
+      for (uint32_t j = 0; j < sizeof(corrct_id) / sizeof(char); j++)
+      {
+        if (finfo.id[j] != corrct_id[j])
+        {
+          close(fbfd);
+          fbfd = -1;
+          break;
+        }
+      }
+
+      if (fbfd >= 0)
+      {
+        printf("The framebuffer device was opened successfully.\n");
+        break;
+      }
+    }
+
+    close(fbfd);
+    printf("Error: cannot open framebuffer device.\n");
+  }
+
+  if (fbfd == -1)
+  {
+    printf("Error: cannot open framebuffer device.\n");
+    return false;
+  }
+
+  struct fb_var_screeninfo vinfo;
+  ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo);
+
+  // printf("Resolution: %dx%d, %d bpp\n", vinfo.xres, vinfo.yres, vinfo.bits_per_pixel);
+
+  map_size = vinfo.xres * vinfo.yres * vinfo.bits_per_pixel / 8;
+  fbmap = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+
+  uint16_t red = (pow(2, 5) - 1) * 0.25f;
+  uint16_t green = (pow(2, 6) - 1) * 0.0f;
+  uint16_t blue = (pow(2, 5) - 1) * 0.25f;
+
+  uint16_t color = red << 11 | green << 5 | blue;
+
+  for (size_t i = 0; i < map_size; i++)
+  {
+    fbmap[i] = color;
+  }
+
+  // while (true)
+  // {
+  //   uint32_t wait = 1000000;
+
+  //   for (uint32_t color = 0; color <= 0b11111; color++)
+  //   {
+  //     printf("color %d\n", color);
+  //     for (size_t i = 0; i < map_size; i++)
+  //     {
+  //       fbmap[i] = (uint16_t)(color);
+  //     }
+  //     usleep(wait);
+  //   }
+  // }
+
   return true;
 }
 
@@ -453,7 +540,7 @@ int main(int argc, char **argv)
 
   // Clear console, render first time
   fprintf(stdout, "\033[H\033[J");
-  renderConsole(true);
+  // renderConsole(true);
   renderSenseHatMatrix(true);
 
   while (true)
@@ -468,7 +555,7 @@ int main(int argc, char **argv)
       break;
 
     bool playfieldChanged = sTetris(key);
-    renderConsole(playfieldChanged);
+    // renderConsole(playfieldChanged);
     renderSenseHatMatrix(playfieldChanged);
 
     // Wait for next tick
