@@ -77,20 +77,18 @@ uint16_t *fbmap;
 // return false if something fails, else true
 bool initializeSenseHat()
 {
-  int fbfd;
+  int fbfd = -1;
 
   for (uint32_t i = 0; i < 10; i++)
   {
     char address[] = "/dev/fb0";
     address[sizeof(address) / sizeof(char) - 2] = (char)(i + 0x30); // Change address to /dev/fb0 - /dev/fb9
-    // printf("%s\n", address);
 
     fbfd = open(address, O_RDWR);
     if (fbfd >= 0)
     {
       struct fb_fix_screeninfo finfo;
       ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
-      // printf("%s\n", finfo.id);
 
       // Check if it is the correct framebuffer
       char corrct_id[] = "RPi-Sense FB";
@@ -98,7 +96,6 @@ bool initializeSenseHat()
       {
         if (finfo.id[j] != corrct_id[j])
         {
-          close(fbfd);
           fbfd = -1;
           break;
         }
@@ -112,7 +109,6 @@ bool initializeSenseHat()
     }
 
     close(fbfd);
-    printf("Error: cannot open framebuffer device.\n");
   }
 
   if (fbfd == -1)
@@ -124,39 +120,9 @@ bool initializeSenseHat()
   struct fb_var_screeninfo vinfo;
   ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo);
 
-  // printf("Resolution: %dx%d, %d bpp\n", vinfo.xres, vinfo.yres, vinfo.bits_per_pixel);
-
   map_size = vinfo.xres * vinfo.yres * vinfo.bits_per_pixel / 8;
   fbmap = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
   close(fbfd);
-
-  srand(time(NULL)); // Initialization, should only be called once
-
-  // uint16_t red = rand() >> (32 - 5);   //(pow(2, 5) - 1) * 0.25f;
-  // uint16_t green = rand() >> (32 - 6); //(pow(2, 6) - 1) * 0.0f;
-  // uint16_t blue = rand() >> (32 - 5);  //(pow(2, 5) - 1) * 0.25f;
-
-  uint16_t color = rand() >> 16; // red << 11 | green << 5 | blue;
-
-  for (size_t i = 0; i < map_size; i++)
-  {
-    fbmap[i] = color;
-  }
-
-  // while (true)
-  // {
-  //   uint32_t wait = 1000000;
-
-  //   for (uint32_t color = 0; color <= 0b11111; color++)
-  //   {
-  //     printf("color %d\n", color);
-  //     for (size_t i = 0; i < map_size; i++)
-  //     {
-  //       fbmap[i] = (uint16_t)(color);
-  //     }
-  //     usleep(wait);
-  //   }
-  // }
 
   return true;
 }
@@ -521,12 +487,6 @@ void renderSenseHatMatrix(bool const playfieldChanged)
   if (!playfieldChanged)
     return;
 
-  // Clear the LED matrix
-  for (size_t i = 0; i < map_size; i++)
-  {
-    fbmap[i] = 0x0000;
-  }
-
   for (unsigned int y = 0; y < game.grid.y; y++)
   {
     for (unsigned int x = 0; x < game.grid.x; x++)
@@ -580,6 +540,8 @@ int main(int argc, char **argv)
     fprintf(stderr, "ERROR: could not initilize sense hat\n");
     return 1;
   };
+
+  srand(time(NULL)); // Initialize random number generator
 
   // Clear console, render first time
   fprintf(stdout, "\033[H\033[J");
