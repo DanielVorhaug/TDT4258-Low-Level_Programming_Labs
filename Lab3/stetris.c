@@ -24,10 +24,13 @@
 
 // If you extend this structure, either avoid pointers or adjust
 // the game logic allocate/deallocate and reset the memory
+
+typedef uint16_t color_t;
+
 typedef struct
 {
   bool occupied;
-  // uint16_t color;
+  color_t color;
 } tile;
 
 typedef struct
@@ -174,6 +177,18 @@ int readSenseHatJoystick()
   return 0;
 }
 
+color_t generateColor(void)
+{
+  color_t color = 0;
+  do
+  {
+    color = rand() >> 16;
+    // Make sure that the chosen color is clearly visible
+  } while (!(color | 0b1100011000011000));
+
+  return color;
+}
+
 // The game logic uses only the following functions to interact with the playfield.
 // if you choose to change the playfield or the tile structure, you might need to
 // adjust this game logic <> playfield interface
@@ -181,6 +196,7 @@ int readSenseHatJoystick()
 static inline void newTile(coord const target)
 {
   game.playfield[target.y][target.x].occupied = true;
+  game.playfield[target.y][target.x].color = generateColor();
 }
 
 static inline void copyTile(coord const to, coord const from)
@@ -206,6 +222,11 @@ static inline void resetRow(unsigned int const target)
 static inline bool tileOccupied(coord const target)
 {
   return game.playfield[target.y][target.x].occupied;
+}
+
+static inline color_t tileColor(coord const target)
+{
+  return game.playfield[target.y][target.x].color;
 }
 
 static inline bool rowOccupied(unsigned int const target)
@@ -500,6 +521,7 @@ void renderSenseHatMatrix(bool const playfieldChanged)
   if (!playfieldChanged)
     return;
 
+  // Clear the LED matrix
   for (size_t i = 0; i < map_size; i++)
   {
     fbmap[i] = 0x0000;
@@ -510,8 +532,7 @@ void renderSenseHatMatrix(bool const playfieldChanged)
     for (unsigned int x = 0; x < game.grid.x; x++)
     {
       coord const checkTile = {x, y};
-      fbmap[y * game.grid.x + x] = (tileOccupied(checkTile) ? 0xffff : 0x0000);
-      // fprintf(stdout, "%c", (tileOccupied(checkTile)) ? '#' : ' ');
+      fbmap[y * game.grid.x + x] = (tileOccupied(checkTile) ? tileColor(checkTile) : 0x0000);
     }
   }
 }
