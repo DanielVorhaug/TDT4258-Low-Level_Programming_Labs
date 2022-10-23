@@ -72,11 +72,17 @@ gameConfig game = {
 size_t map_size;
 uint16_t *fbmap;
 
+struct pollfd pollfds = {
+    .fd = -1,
+    .events = POLLIN,
+};
+
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat()
 {
+  // Init matrix
   int fbfd = -1;
 
   for (uint32_t i = 0; i < 10; i++)
@@ -90,24 +96,12 @@ bool initializeSenseHat()
       struct fb_fix_screeninfo finfo;
       ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
 
-      // Check if it is the correct framebuffer
-      char corrct_id[] = "RPi-Sense FB";
-      for (uint32_t j = 0; j < sizeof(corrct_id) / sizeof(char); j++)
-      {
-        if (finfo.id[j] != corrct_id[j])
-        {
-          fbfd = -1;
-          break;
-        }
-      }
-
-      if (fbfd >= 0)
-      {
-        printf("The framebuffer device was opened successfully.\n");
+      if (!strcmp(finfo.id, "RPi-Sense FB"))
+        // The correct frambuffer is found
         break;
-      }
+      else
+        fbfd = -1;
     }
-
     close(fbfd);
   }
 
@@ -124,6 +118,34 @@ bool initializeSenseHat()
   fbmap = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
   close(fbfd);
 
+  // Init joystick
+  for (uint32_t i = 0; i < 10; i++)
+  {
+    char address[] = "/dev/input/event0";
+    address[sizeof(address) / sizeof(char) - 2] = (char)(i + 0x30); // Change address to /dev/input/event0 - /dev/input/event9
+
+    pollfds.fd = open(address, O_RDONLY);
+
+    if (pollfds.fd >= 0)
+    {
+      char id[256] = "Unknown";
+      ioctl(pollfds.fd, EVIOCGNAME(sizeof(id)), id);
+
+      if (!strcmp(id, "Raspberry Pi Sense HAT Joystick"))
+        // The correct joystick is found
+        break;
+      else
+        pollfds.fd = -1;
+    }
+    close(pollfds.fd);
+  }
+
+  if (pollfds.fd == -1)
+  {
+    printf("Error: cannot open joystick device.\n");
+    return false;
+  }
+
   return true;
 }
 
@@ -132,6 +154,7 @@ bool initializeSenseHat()
 void freeSenseHat()
 {
   munmap(fbmap, map_size);
+  close(pollfds.fd);
 }
 
 // This function should return the key that corresponds to the joystick press
@@ -140,6 +163,13 @@ void freeSenseHat()
 // !!! when nothing was pressed you MUST return 0 !!!
 int readSenseHatJoystick()
 {
+  if (poll(&pollfds, 1, 0))
+  {
+    struct input_event in_event;
+    if (read(pollfds.fd, &in_event, sizeof(in_event)))
+      if (in_event.type == EV_KEY && in_event.value == 1)
+        return in_event.code;
+  }
   return 0;
 }
 
@@ -150,7 +180,7 @@ color_t generateColor(void)
   {
     color = rand() >> 16;
     // Make sure that the chosen color is clearly visible
-  } while (!(color | 0b1100011000011000));
+  } while (!(color & 0b1100011000011000));
 
   return color;
 }
