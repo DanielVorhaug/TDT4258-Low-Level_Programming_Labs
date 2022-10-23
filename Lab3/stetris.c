@@ -69,9 +69,11 @@ gameConfig game = {
     .initNextGameTick = 50,
 };
 
+// Matrix memory map and size
 size_t map_size;
 uint16_t *fbmap;
 
+// Polling data
 struct pollfd pollfds = {
     .fd = -1,
     .events = POLLIN,
@@ -85,19 +87,23 @@ bool initializeSenseHat()
   // Init matrix
   int fbfd = -1;
 
+  // Loop through fb devices
   for (uint32_t i = 0; i < 10; i++)
   {
+     // Set address to /dev/fb0 - /dev/fb9
     char address[] = "/dev/fb0";
-    address[sizeof(address) / sizeof(char) - 2] = (char)(i + 0x30); // Change address to /dev/fb0 - /dev/fb9
+    address[sizeof(address) / sizeof(char) - 2] = (char)(i + 0x30);
 
+    // Try to open device
     fbfd = open(address, O_RDWR);
     if (fbfd >= 0)
     {
+      // Check if this is the correct device
       struct fb_fix_screeninfo finfo;
       ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
 
       if (!strcmp(finfo.id, "RPi-Sense FB"))
-        // The correct frambuffer is found
+        // The correct device is found
         break;
       else
         fbfd = -1;
@@ -105,6 +111,7 @@ bool initializeSenseHat()
     close(fbfd);
   }
 
+  // Exit if device is not found
   if (fbfd == -1)
   {
     printf("Error: cannot open framebuffer device.\n");
@@ -119,16 +126,20 @@ bool initializeSenseHat()
   close(fbfd);
 
   // Init joystick
+
+  // Loop through event devices
   for (uint32_t i = 0; i < 10; i++)
   {
+    // Set address to /dev/input/event0 - /dev/input/event9
     char address[] = "/dev/input/event0";
-    address[sizeof(address) / sizeof(char) - 2] = (char)(i + 0x30); // Change address to /dev/input/event0 - /dev/input/event9
+    address[sizeof(address) / sizeof(char) - 2] = (char)(i + 0x30); 
 
     pollfds.fd = open(address, O_RDONLY);
 
     if (pollfds.fd >= 0)
     {
-      char id[256] = "Unknown";
+      // Check if this is the correct device
+      char id[256] = "";
       ioctl(pollfds.fd, EVIOCGNAME(sizeof(id)), id);
 
       if (!strcmp(id, "Raspberry Pi Sense HAT Joystick"))
@@ -140,6 +151,7 @@ bool initializeSenseHat()
     close(pollfds.fd);
   }
 
+  // Exit if device is not found
   if (pollfds.fd == -1)
   {
     printf("Error: cannot open joystick device.\n");
@@ -163,8 +175,10 @@ void freeSenseHat()
 // !!! when nothing was pressed you MUST return 0 !!!
 int readSenseHatJoystick()
 {
+  // Poll joystick
   if (poll(&pollfds, 1, 0))
   {
+    // Read joystick and return key
     struct input_event in_event;
     if (read(pollfds.fd, &in_event, sizeof(in_event)))
       if (in_event.type == EV_KEY && in_event.value == 1)
@@ -173,15 +187,15 @@ int readSenseHatJoystick()
   return 0;
 }
 
+// Generate a clear, visible color for the LED matrix
 color_t generateColor(void)
 {
-  color_t color = 0;
+  color_t color;
   do
   {
     color = rand() >> 16;
     // Make sure that the chosen color is clearly visible
   } while (!(color & 0b1100011000011000));
-
   return color;
 }
 
