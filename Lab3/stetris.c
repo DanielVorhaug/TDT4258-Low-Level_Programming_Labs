@@ -169,7 +169,10 @@ void freeSenseHat()
   for (uint32_t i = 0; i < map_size / sizeof(uint16_t); i++)
     fbmap[i] = 0;
 
+  // Unmap LED matrix memory map
   munmap(fbmap, map_size);
+  
+  // Close joystick
   close(pollfds.fd);
 }
 
@@ -535,11 +538,13 @@ void renderSenseHatMatrix(bool const playfieldChanged)
   if (!playfieldChanged)
     return;
 
+  // Loop through grid and set the LED matrix accordingly
   for (unsigned int y = 0; y < game.grid.y; y++)
   {
     for (unsigned int x = 0; x < game.grid.x; x++)
     {
       coord const checkTile = {x, y};
+      // Color the tile if it is occupied
       fbmap[y * game.grid.x + x] = (tileOccupied(checkTile) ? tileColor(checkTile) : 0x0000);
     }
   }
