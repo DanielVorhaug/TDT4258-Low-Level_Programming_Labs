@@ -165,6 +165,10 @@ bool initializeSenseHat()
 // Here you can free up everything that you might have opened/allocated
 void freeSenseHat()
 {
+  // Clear LED matrix
+  for (uint32_t i = 0; i < map_size / sizeof(uint16_t); i++)
+    fbmap[i] = 0;
+
   munmap(fbmap, map_size);
   close(pollfds.fd);
 }
